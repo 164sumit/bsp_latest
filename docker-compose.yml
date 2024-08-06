@@ -1,0 +1,205 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - nextapp
+      - grafana
+    networks:
+      - app-network
+
+
+  nextapp:
+    build:
+      context: ./BSP
+      dockerfile: Dockerfile
+    container_name: BSPContainer
+    env_file:
+      - ./BSP/.env 
+    expose:
+      - "3000"
+    depends_on:
+      - mongo
+      - redis
+    environment:
+      - MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - frontend
+      - backend
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+  mongo:
+    image: mongo
+    restart: always
+    ports:
+      - 27017:27017
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    networks:
+      - app-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo mongo:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mongo-express:
+    image: mongo-express
+    restart: always
+    ports:
+      - 8081:8081
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USER}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD}
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/
+      ME_CONFIG_BASICAUTH: false
+    networks:
+      - backend
+      - app-network
+    depends_on:
+      - mongo
+
+  grafana:
+    image: grafana/grafana
+    container_name: BSPGrafana
+    ports:
+      - "3001:3000"
+    environment:
+    - GF_AUTH_ANONYMOUS_ENABLED=true
+    - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
+    - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    - GF_SECURITY_ALLOW_EMBEDDING=true
+    # - GF_SECURITY_COOKIE_SAMESITE=lax
+    # - GF_SECURITY_COOKIE_SECURE=true
+    - GF_AUTH_API_KEY_ENABLED=true
+    - GF_SECURITY_ADMIN_PASSWORD=123456
+    
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - influxdb
+    networks:
+      - monitoring
+      - app-network
+
+  influxdb:
+    image: influxdb
+    container_name: BSPInfluxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    environment:
+      - INFLUXDB_DB=yourdbname
+    networks:
+      - monitoring
+      - app-network
+
+  redis:
+    image: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  metaflow-app:
+    build:
+      context: ./Metaflow
+      dockerfile: Dockerfile
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+    # volumes:
+    #   - ./your_metaflow_code:/app2
+    ports:
+      - "5000:5000"
+    depends_on:
+      - influxdb
+    networks:
+      - app-network
+      
+  # metaflow-service:
+  #   image: netflixoss/metaflow_metadata_service
+    
+  #   depends_on:
+  #     - postgres
+  #   environment:
+  #     MF_METADATA_DB_HOST: postgres
+  #     MF_METADATA_DB_PORT: 5432
+  #     MF_METADATA_DB_NAME: ${POSTGRES_DB}
+  #     MF_METADATA_DB_USER: ${POSTGRES_USER}
+  #     MF_METADATA_DB_PSWD: ${POSTGRES_PASSWORD}
+  #     MF_METADATA_DB_ECHO: 'true'
+  #   ports:
+  #     - "8080:8080"
+  #   networks:
+  #     - app-network
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - "5050:80"
+    networks:
+      - app-network
+
+
+volumes:
+  mongodb_data:
+  grafana_data:
+  influxdb_data:
+  postgres_data:
+  metaflow_data:
+
+networks:
+  frontend:
+  backend:
+  monitoring:
+  app-network:
+    driver: bridge

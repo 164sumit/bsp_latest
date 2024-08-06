@@ -1,0 +1,12 @@
+pandas==1.5.3
+numpy==1.24.3
+scikit-learn==1.3.2
+openpyxl
+metaflow 
+matplotlib  
+plotly==5.18.0
+sqlalchemy<2.0
+pyarrow
+fastparquet
+flask
+flask_cors
